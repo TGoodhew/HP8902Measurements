@@ -46,7 +46,7 @@ namespace HP8902Measurements
                 new SelectionPrompt<string>()
                     .Title("Select the test to run?")
                     .PageSize(10)
-                    .AddChoices(new[] { "Set GPIB Addresses", "Connect to instruments", "Calibrate Sensor","Set expected frequency", "Exit" })
+                    .AddChoices(new[] { "Set GPIB Addresses", "Connect to instruments", "Calibrate Sensor", "Set expected frequency", "Measure", "Exit" })
                     );
 
             while (TestChoice != "Exit")
@@ -180,7 +180,7 @@ namespace HP8902Measurements
                                 }
 
                                 // Enable the LO on the 8902A with the chosen frequency
-                                SendCommand("27.3SP"+((frequencyGHz+ chosenIncrement)*1000).ToString()+"MZ", gpibSession8902A); // Enable LO
+                                SendCommand("27.3SP" + ((frequencyGHz + chosenIncrement) * 1000).ToString() + "MZ", gpibSession8902A); // Enable LO
 
                                 // Set the 8673B to the correct LO frequency
                                 SendCommand(string.Format("FR{0:G}GZ", frequencyGHz + chosenIncrement), gpibSession8673B);
@@ -193,6 +193,62 @@ namespace HP8902Measurements
                             Thread.Sleep(1000); // Pause for a moment to let the user see the message
                             break;
                         }
+
+                    case "Measure":
+                        {
+                            while (true)
+                            {
+                                if (gpibSession8902A == null || gpibSession8673B == null)
+                                {
+                                    AnsiConsole.MarkupLine("[red]Error: Both instruments must be connected before measurement can proceed.[/]");
+                                    Thread.Sleep(1000); // Pause for a moment to let the user see the message
+                                    break;
+                                }
+
+                                // Start measurement process
+                                AnsiConsole.MarkupLine("[green]Starting measurement...[/]");
+                                
+                                // Place the unit into RF Power mode and with the trigger off (free run)
+                                SendCommand("M4T0", gpibSession8902A);
+                                
+                                // Request a measurement
+                                SendCommand("22.3SP", gpibSession8902A);
+                                
+                                // Wait for the data to be available
+                                srqWait.Wait();
+                                
+                                // Clear the SRQ Mask
+                                SendCommand("22.0SP", gpibSession8902A);
+
+                                SendCommand("LG", gpibSession8902A); // Set to Log mode
+
+                                // Read the measurement
+                                AnsiConsole.MarkupLine("[green]Measured Power: [/]" + ToEngineeringFormat.Convert(ReadResponse(gpibSession8902A), 8, "dBm"));
+
+                                // Place the unit into RF Power mode and with the trigger off (free run)
+                                SendCommand("M5T0", gpibSession8902A);
+
+                                // Request a measurement
+                                SendCommand("22.3SP", gpibSession8902A);
+
+                                // Wait for the data to be available
+                                srqWait.Wait();
+
+                                // Clear the SRQ Mask
+                                SendCommand("22.0SP", gpibSession8902A);
+
+                                // Read the measurement
+                                AnsiConsole.MarkupLine("[green]Measured Frequency: [/]" + ToEngineeringFormat.Convert(ReadResponse(gpibSession8902A), 8, "Hz"));
+
+                                var confirmation = AnsiConsole.Prompt(new ConfirmationPrompt("Measure again?"));
+
+                                if (!confirmation)
+                                {
+                                    break;
+                                }
+                            }
+                            break;
+                        }
                 }
 
                 // Clear the screen & Display title
@@ -203,7 +259,7 @@ namespace HP8902Measurements
                 new SelectionPrompt<string>()
                     .Title("Select the test to run?")
                     .PageSize(10)
-                    .AddChoices(new[] { "Set GPIB Addresses", "Connect to instruments", "Calibrate Sensor", "Set expected frequency", "Exit" })
+                    .AddChoices(new[] { "Set GPIB Addresses", "Connect to instruments", "Calibrate Sensor", "Set expected frequency", "Measure", "Exit" })
                     );
             }
 
@@ -387,29 +443,30 @@ namespace HP8902Measurements
             }
         }
 
-        static private string ReadResponse(GpibSession gpibSession)
+        static private double ReadResponse(GpibSession gpibSession)
         {
             try
             {
-                return gpibSession.FormattedIO.ReadLine();
+                //return gpibSession.FormattedIO.ReadLine();
+                return gpibSession.FormattedIO.ReadDouble();
             }
             catch (Exception ex)
             {
                 AnsiConsole.MarkupLine($"[red]GPIB Read Error: {ex.Message}[/]");
                 Debug.WriteLine($"GPIB Read Error: {ex}");
-                return string.Empty;
+                return Double.NaN;
             }
         }
-        static private string QueryString(string command, GpibSession gpibSession)
-        {
-            SendCommand(command, gpibSession);
-            var response = ReadResponse(gpibSession);
-            if (string.IsNullOrWhiteSpace(response))
-            {
-                AnsiConsole.MarkupLine("[yellow]Warning: No response from instrument.[/]");
-            }
-            return response;
-        }
+        //static private string QueryString(string command, GpibSession gpibSession)
+        //{
+        //    SendCommand(command, gpibSession);
+        //    var response = ReadResponse(gpibSession);
+        //    if (string.IsNullOrWhiteSpace(response))
+        //    {
+        //        AnsiConsole.MarkupLine("[yellow]Warning: No response from instrument.[/]");
+        //    }
+        //    return response;
+        //}
 
         public static void SRQHandler(object sender, Ivi.Visa.VisaEventArgs e, GpibSession gpibSession, SemaphoreSlim srqWait)
         {
